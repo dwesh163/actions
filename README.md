@@ -1,4 +1,4 @@
-# actions
+# Reusable GitHub Actions
 
 A collection of reusable GitHub Actions to standardize version detection and release automation across projects.
 
