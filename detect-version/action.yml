@@ -1,0 +1,70 @@
+name: 'Detect Version'
+description: 'Detect version from package.json (js) or setup.py (python) and check if a release already exists'
+
+inputs:
+  type:
+    description: 'Project type: js or python'
+    required: true
+  github-token:
+    description: 'GitHub token for checking existing releases'
+    required: true
+
+outputs:
+  version:
+    description: 'Detected version'
+    value: ${{ steps.consolidate.outputs.version }}
+  release_exist:
+    description: 'true if a release already exists for this version'
+    value: ${{ steps.check.outputs.release_exist }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Get version from package.json
+      if: inputs.type == 'js'
+      id: version_js
+      shell: bash
+      run: |
+        [ ! -f "package.json" ] && echo "::error::package.json not found" && exit 1
+        VERSION=$(jq -r .version package.json)
+        [ "$VERSION" = "null" ] || [ -z "$VERSION" ] && echo "::error::No version in package.json" && exit 1
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+    - name: Get version from setup.py
+      if: inputs.type == 'python'
+      id: version_python
+      shell: bash
+      run: |
+        [ ! -f "setup.py" ] && echo "::error::setup.py not found" && exit 1
+        VERSION=$(python3 -c "
+        import re
+        content = open('setup.py').read()
+        m = re.search(r'version\s*=\s*[\"\'](.*?)[\"\']', content)
+        print(m.group(1) if m else '')
+        ")
+        [ -z "$VERSION" ] && echo "::error::No version found in setup.py" && exit 1
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+    - name: Consolidate version
+      id: consolidate
+      shell: bash
+      run: |
+        VERSION="${{ steps.version_js.outputs.version }}${{ steps.version_python.outputs.version }}"
+        [ -z "$VERSION" ] && echo "::error::Could not determine version" && exit 1
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Detected version: $VERSION"
+
+    - name: Check if release exists
+      id: check
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        VERSION="${{ steps.consolidate.outputs.version }}"
+        if gh release view "v$VERSION" >/dev/null 2>&1; then
+          echo "Release v$VERSION already exists"
+          echo "release_exist=true" >> $GITHUB_OUTPUT
+        else
+          echo "No release for v$VERSION"
+          echo "release_exist=false" >> $GITHUB_OUTPUT
+        fi

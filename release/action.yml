@@ -1,0 +1,60 @@
+name: 'Create Release'
+description: 'Generate release notes from git history and create a GitHub release. Requires fetch-depth: 0 on checkout.'
+
+inputs:
+  version:
+    description: 'Version to release (without v prefix)'
+    required: true
+  github-token:
+    description: 'GitHub token for creating releases'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Generate release notes
+      id: notes
+      shell: bash
+      run: |
+        VERSION="${{ inputs.version }}"
+        LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+        > release_notes.txt
+
+        if [ -z "$LAST_TAG" ]; then
+          COMMITS_COUNT=$(git rev-list HEAD --count)
+          AUTHORS=$(git log --pretty=format:"%an" | sort -u | sed 's/.*$/`&`/' | paste -sd ',' | sed 's/,/, /g')
+          COMMITS=$(git log --oneline --pretty=format:"%h %s")
+          echo "Initial release v$VERSION with $COMMITS_COUNT commits by $AUTHORS." >> release_notes.txt
+        else
+          COMMITS_COUNT=$(git rev-list "${LAST_TAG}..HEAD" --count)
+          AUTHORS=$(git log "${LAST_TAG}..HEAD" --pretty=format:"%an" | sort -u | sed 's/.*$/`&`/' | paste -sd ',' | sed 's/,/, /g')
+          COMMITS=$(git log --oneline "${LAST_TAG}..HEAD" --pretty=format:"%h %s")
+          echo "Release v$VERSION includes $COMMITS_COUNT commits since $LAST_TAG by $AUTHORS." >> release_notes.txt
+        fi
+
+        echo "" >> release_notes.txt
+
+        FEATURE=$(echo "$COMMITS" | grep -iE "\[(add|feat|feature)\]" | sed 's/^/- /' || true)
+        [ -n "$FEATURE" ] && printf "### Features\n%s\n\n" "$FEATURE" >> release_notes.txt
+
+        FIXES=$(echo "$COMMITS" | grep -iE "\[(fix|bugfix|hotfix)\]" | sed 's/^/- /' || true)
+        [ -n "$FIXES" ] && printf "### Bug Fixes\n%s\n\n" "$FIXES" >> release_notes.txt
+
+        MAINT=$(echo "$COMMITS" | grep -iE "\[(version|refactor|chore|style|perf|update|improve)\]" | sed 's/^/- /' || true)
+        [ -n "$MAINT" ] && printf "### Maintenance\n%s\n\n" "$MAINT" >> release_notes.txt
+
+        DOCS=$(echo "$COMMITS" | grep -iE "\[(docs|doc|documentation)\]" | sed 's/^/- /' || true)
+        [ -n "$DOCS" ] && printf "### Documentation\n%s\n\n" "$DOCS" >> release_notes.txt
+
+        OTHER=$(echo "$COMMITS" | grep -viE "\[(add|feat|feature|fix|bugfix|hotfix|version|refactor|chore|style|perf|update|improve|docs|doc|documentation)\]" | sed 's/^/- /' || true)
+        [ -n "$OTHER" ] && printf "### Other Changes\n%s\n" "$OTHER" >> release_notes.txt
+
+    - name: Create GitHub release
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        gh release create "v${{ inputs.version }}" \
+          --title "v${{ inputs.version }}" \
+          --notes-file release_notes.txt \
+          --latest
