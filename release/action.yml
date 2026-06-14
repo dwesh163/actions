@@ -36,19 +36,19 @@ runs:
         echo "" >> release_notes.txt
 
         FEATURE=$(echo "$COMMITS" | grep -iE "\[(add|feat|feature)\]" | sed 's/^/- /' || true)
-        [ -n "$FEATURE" ] && printf "### Features\n%s\n\n" "$FEATURE" >> release_notes.txt
+        [ -n "$FEATURE" ] && printf "### Features\n%s\n\n" "$FEATURE" >> release_notes.txt || true
 
         FIXES=$(echo "$COMMITS" | grep -iE "\[(fix|bugfix|hotfix)\]" | sed 's/^/- /' || true)
-        [ -n "$FIXES" ] && printf "### Bug Fixes\n%s\n\n" "$FIXES" >> release_notes.txt
+        [ -n "$FIXES" ] && printf "### Bug Fixes\n%s\n\n" "$FIXES" >> release_notes.txt || true
 
         MAINT=$(echo "$COMMITS" | grep -iE "\[(init|version|refactor|chore|style|perf|update|improve)\]" | sed 's/^/- /' || true)
-        [ -n "$MAINT" ] && printf "### Maintenance\n%s\n\n" "$MAINT" >> release_notes.txt
+        [ -n "$MAINT" ] && printf "### Maintenance\n%s\n\n" "$MAINT" >> release_notes.txt || true
 
         DOCS=$(echo "$COMMITS" | grep -iE "\[(docs|doc|documentation)\]" | sed 's/^/- /' || true)
-        [ -n "$DOCS" ] && printf "### Documentation\n%s\n\n" "$DOCS" >> release_notes.txt
+        [ -n "$DOCS" ] && printf "### Documentation\n%s\n\n" "$DOCS" >> release_notes.txt || true
 
         OTHER=$(echo "$COMMITS" | grep -viE "\[(add|feat|feature|fix|bugfix|hotfix|init|version|refactor|chore|style|perf|update|improve|docs|doc|documentation)\]" | grep -v '^$' | sed 's/^/- /' || true)
-        [ -n "$OTHER" ] && printf "### Other Changes\n%s\n" "$OTHER" >> release_notes.txt
+        [ -n "$OTHER" ] && printf "### Other Changes\n%s\n" "$OTHER" >> release_notes.txt || true
 
     - name: Create GitHub release
       shell: bash
