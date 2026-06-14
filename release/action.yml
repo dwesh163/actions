@@ -23,12 +23,12 @@ runs:
         if [ -z "$LAST_TAG" ]; then
           COMMITS_COUNT=$(git rev-list HEAD --count)
           AUTHORS=$(git log --pretty=format:"%an" | sort -u | sed 's/.*$/`&`/' | paste -sd ',' | sed 's/,/, /g')
-          COMMITS=$(git log --oneline --pretty=format:"%h %s")
+          COMMITS=$(git log --pretty=format:"%h %s")
           echo "Initial release v$VERSION with $COMMITS_COUNT commits by $AUTHORS." >> release_notes.txt
         else
           COMMITS_COUNT=$(git rev-list "${LAST_TAG}..HEAD" --count)
           AUTHORS=$(git log "${LAST_TAG}..HEAD" --pretty=format:"%an" | sort -u | sed 's/.*$/`&`/' | paste -sd ',' | sed 's/,/, /g')
-          COMMITS=$(git log --oneline "${LAST_TAG}..HEAD" --pretty=format:"%h %s")
+          COMMITS=$(git log "${LAST_TAG}..HEAD" --pretty=format:"%h %s")
           echo "Release v$VERSION includes $COMMITS_COUNT commits since $LAST_TAG by $AUTHORS." >> release_notes.txt
         fi
 
@@ -40,13 +40,13 @@ runs:
         FIXES=$(echo "$COMMITS" | grep -iE "\[(fix|bugfix|hotfix)\]" | sed 's/^/- /' || true)
         [ -n "$FIXES" ] && printf "### Bug Fixes\n%s\n\n" "$FIXES" >> release_notes.txt
 
-        MAINT=$(echo "$COMMITS" | grep -iE "\[(version|refactor|chore|style|perf|update|improve)\]" | sed 's/^/- /' || true)
+        MAINT=$(echo "$COMMITS" | grep -iE "\[(init|version|refactor|chore|style|perf|update|improve)\]" | sed 's/^/- /' || true)
         [ -n "$MAINT" ] && printf "### Maintenance\n%s\n\n" "$MAINT" >> release_notes.txt
 
         DOCS=$(echo "$COMMITS" | grep -iE "\[(docs|doc|documentation)\]" | sed 's/^/- /' || true)
         [ -n "$DOCS" ] && printf "### Documentation\n%s\n\n" "$DOCS" >> release_notes.txt
 
-        OTHER=$(echo "$COMMITS" | grep -viE "\[(add|feat|feature|fix|bugfix|hotfix|version|refactor|chore|style|perf|update|improve|docs|doc|documentation)\]" | sed 's/^/- /' || true)
+        OTHER=$(echo "$COMMITS" | grep -viE "\[(add|feat|feature|fix|bugfix|hotfix|init|version|refactor|chore|style|perf|update|improve|docs|doc|documentation)\]" | grep -v '^$' | sed 's/^/- /' || true)
         [ -n "$OTHER" ] && printf "### Other Changes\n%s\n" "$OTHER" >> release_notes.txt
 
     - name: Create GitHub release
@@ -54,7 +54,14 @@ runs:
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
       run: |
-        gh release create "v${{ inputs.version }}" \
-          --title "v${{ inputs.version }}" \
+        VERSION="${{ inputs.version }}"
+        HIGHEST_TAG=$(git tag -l 'v[0-9]*' | sort -V | tail -1 | sed 's/^v//')
+        LATEST_FLAG=""
+        if [ -z "$HIGHEST_TAG" ] || [ "$(printf '%s\n%s\n' "$HIGHEST_TAG" "$VERSION" | sort -V | head -1)" = "$HIGHEST_TAG" ]; then
+          LATEST_FLAG="--latest"
+        fi
+
+        gh release create "v$VERSION" \
+          --title "v$VERSION" \
           --notes-file release_notes.txt \
-          --latest
+          $LATEST_FLAG
