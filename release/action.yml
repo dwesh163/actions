@@ -16,6 +16,7 @@ runs:
       id: notes
       shell: bash
       run: |
+        set -x
         VERSION="${{ inputs.version }}"
         LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
         > release_notes.txt
@@ -54,6 +55,7 @@ runs:
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
       run: |
+        set -x
         VERSION="${{ inputs.version }}"
         HIGHEST_TAG=$(git tag -l 'v[0-9]*' | sort -V | tail -1 | sed 's/^v//')
         LATEST_FLAG=""
