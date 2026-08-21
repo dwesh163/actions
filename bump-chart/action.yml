@@ -1,0 +1,130 @@
+name: 'Bump Chart'
+description: 'Bump the appVersion (and chart version) of a Helm chart in a separate charts repository, committing as a GitHub App'
+
+inputs:
+  chart-repo:
+    description: 'Target chart repository, e.g. xdew-cloud/charts'
+    required: true
+  chart-name:
+    description: 'Name of the chart/app to bump (used as the folder name under charts/ and in the commit message)'
+    required: true
+  app-version:
+    description: 'New appVersion to set for the chart (a leading "v" is stripped automatically)'
+    required: true
+  chart-path:
+    description: 'Path to the chart directory inside chart-repo. Defaults to charts/<chart-name>'
+    required: false
+    default: ''
+  bump-chart-version:
+    description: 'Also bump the patch segment of the Chart.yaml version field'
+    required: false
+    default: 'true'
+  branch:
+    description: 'Branch to checkout and push to in chart-repo. Defaults to the repository default branch'
+    required: false
+    default: ''
+  github-app-id:
+    description: 'GitHub App ID used to authenticate the commit (GH_APP_ID)'
+    required: true
+  github-app-private-key:
+    description: 'GitHub App private key used to authenticate the commit (GH_APP_SECRET)'
+    required: true
+
+outputs:
+  committed:
+    description: 'true if a commit was pushed, false if the chart was already at the target appVersion'
+    value: ${{ steps.commit.outputs.committed }}
+  commit-sha:
+    description: 'SHA of the created commit, if any'
+    value: ${{ steps.commit.outputs.commit_sha }}
+  chart-version:
+    description: 'Resulting Chart.yaml version field after the bump'
+    value: ${{ steps.bump.outputs.chart_version }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Parse chart repo
+      id: repo
+      shell: bash
+      run: |
+        REPO="${{ inputs.chart-repo }}"
+        [ "$REPO" != */* ] && echo "::error::chart-repo must be in 'owner/name' form" && exit 1
+        echo "owner=${REPO%%/*}" >> $GITHUB_OUTPUT
+        echo "name=${REPO##*/}" >> $GITHUB_OUTPUT
+
+    - name: Generate GitHub App token
+      id: app-token
+      uses: actions/create-github-app-token@v2
+      with:
+        app-id: ${{ inputs.github-app-id }}
+        private-key: ${{ inputs.github-app-private-key }}
+        owner: ${{ steps.repo.outputs.owner }}
+        repositories: ${{ steps.repo.outputs.name }}
+
+    - name: Checkout chart repository
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ inputs.chart-repo }}
+        ref: ${{ inputs.branch }}
+        token: ${{ steps.app-token.outputs.token }}
+        path: chart-repo
+
+    - name: Resolve chart path
+      id: path
+      shell: bash
+      run: |
+        CHART_DIR="${{ inputs.chart-path }}"
+        [ -z "$CHART_DIR" ] && CHART_DIR="charts/${{ inputs.chart-name }}"
+        [ ! -f "chart-repo/$CHART_DIR/Chart.yaml" ] && echo "::error::Chart.yaml not found at $CHART_DIR" && exit 1
+        echo "chart_dir=$CHART_DIR" >> $GITHUB_OUTPUT
+
+    - name: Bump chart version
+      id: bump
+      shell: bash
+      run: |
+        CHART_FILE="chart-repo/${{ steps.path.outputs.chart_dir }}/Chart.yaml"
+        NEW_APP_VERSION="${{ inputs.app-version }}"
+        NEW_APP_VERSION="${NEW_APP_VERSION#v}"
+
+        CURRENT_APP_VERSION=$(grep -E '^appVersion:' "$CHART_FILE" | sed -E 's/^appVersion:[[:space:]]*"?([^"]*)"?/\1/')
+        CURRENT_CHART_VERSION=$(grep -E '^version:' "$CHART_FILE" | sed -E 's/^version:[[:space:]]*"?([^"]*)"?/\1/')
+        [ -z "$CURRENT_CHART_VERSION" ] && echo "::error::No 'version' field found in $CHART_FILE" && exit 1
+
+        if [ "$CURRENT_APP_VERSION" = "$NEW_APP_VERSION" ]; then
+          echo "Chart already at appVersion $NEW_APP_VERSION"
+          echo "changed=false" >> $GITHUB_OUTPUT
+          echo "chart_version=$CURRENT_CHART_VERSION" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        sed -i -E "s/^appVersion:.*/appVersion: \"$NEW_APP_VERSION\"/" "$CHART_FILE"
+
+        NEW_CHART_VERSION="$CURRENT_CHART_VERSION"
+        if [ "${{ inputs.bump-chart-version }}" = "true" ]; then
+          NEW_CHART_VERSION=$(echo "$CURRENT_CHART_VERSION" | awk -F. '{ $NF += 1; print $1"."$2"."$3 }' OFS=.)
+          sed -i -E "s/^version:.*/version: $NEW_CHART_VERSION/" "$CHART_FILE"
+        fi
+
+        echo "changed=true" >> $GITHUB_OUTPUT
+        echo "app_version=$NEW_APP_VERSION" >> $GITHUB_OUTPUT
+        echo "chart_version=$NEW_CHART_VERSION" >> $GITHUB_OUTPUT
+
+    - name: Commit and push
+      id: commit
+      shell: bash
+      run: |
+        if [ "${{ steps.bump.outputs.changed }}" != "true" ]; then
+          echo "committed=false" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        cd chart-repo
+        git config user.name "${{ steps.app-token.outputs.app-slug }}[bot]"
+        git config user.email "${{ steps.app-token.outputs.app-slug }}[bot]@users.noreply.github.com"
+        git add "${{ steps.path.outputs.chart_dir }}/Chart.yaml"
+        git commit -m "[auto] Bump ${{ inputs.chart-name }} chart to version ${{ steps.bump.outputs.app_version }}"
+        git push origin HEAD
+
+        echo "committed=true" >> $GITHUB_OUTPUT
+        echo "commit_sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
