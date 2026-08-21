@@ -49,7 +49,7 @@ runs:
       shell: bash
       run: |
         REPO="${{ inputs.chart-repo }}"
-        [ "$REPO" != */* ] && echo "::error::chart-repo must be in 'owner/name' form" && exit 1
+        [[ "$REPO" != */* ]] && echo "::error::chart-repo must be in 'owner/name' form" && exit 1
         echo "owner=${REPO%%/*}" >> $GITHUB_OUTPUT
         echo "name=${REPO##*/}" >> $GITHUB_OUTPUT
 
