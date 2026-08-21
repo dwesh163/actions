@@ -21,9 +21,9 @@ Authentication is done via a GitHub App (not `GITHUB_TOKEN`), since the target r
 | Name | Required | Default | Description |
 |------|----------|---------|-------------|
 | `chart-repo` | yes | | Target chart repository, e.g. `xdew-cloud/charts` |
-| `chart-name` | yes | | Name of the chart/app to bump, used as the folder name under `charts/` and in the commit message |
+| `chart-name` | yes | | Name of the chart/app to bump, used as the default folder name and in the commit message |
 | `app-version` | yes | | New `appVersion` to set (a leading `v` is stripped automatically) |
-| `chart-path` | no | `charts/<chart-name>` | Path to the chart directory inside `chart-repo`, if not the default layout |
+| `chart-path` | no | `<chart-name>` | Path to the chart directory inside `chart-repo`, if not the default layout |
 | `bump-chart-version` | no | `true` | Also bump the patch segment of the Chart.yaml `version` field |
 | `branch` | no | repo default branch | Branch to checkout and push to in `chart-repo` |
 | `github-app-id` | yes | | GitHub App ID (`GH_APP_ID`) used to authenticate the commit |

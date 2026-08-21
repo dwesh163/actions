@@ -6,13 +6,13 @@ inputs:
     description: 'Target chart repository, e.g. xdew-cloud/charts'
     required: true
   chart-name:
-    description: 'Name of the chart/app to bump (used as the folder name under charts/ and in the commit message)'
+    description: 'Name of the chart/app to bump (used as the default folder name and in the commit message)'
     required: true
   app-version:
     description: 'New appVersion to set for the chart (a leading "v" is stripped automatically)'
     required: true
   chart-path:
-    description: 'Path to the chart directory inside chart-repo. Defaults to charts/<chart-name>'
+    description: 'Path to the chart directory inside chart-repo. Defaults to <chart-name>'
     required: false
     default: ''
   bump-chart-version:
@@ -75,7 +75,7 @@ runs:
       shell: bash
       run: |
         CHART_DIR="${{ inputs.chart-path }}"
-        [ -z "$CHART_DIR" ] && CHART_DIR="charts/${{ inputs.chart-name }}"
+        [ -z "$CHART_DIR" ] && CHART_DIR="${{ inputs.chart-name }}"
         [ ! -f "chart-repo/$CHART_DIR/Chart.yaml" ] && echo "::error::Chart.yaml not found at $CHART_DIR" && exit 1
         echo "chart_dir=$CHART_DIR" >> $GITHUB_OUTPUT
 
