@@ -1,13 +1,13 @@
 # detect-version
 
-Detects the project version from `package.json` (JS) or `setup.py` (Python) and checks whether a GitHub release already exists for that version.
+Detects the project version from `package.json` (JS), `setup.py` (Python) or a plain version file, and checks whether a GitHub release already exists for that version.
 
 ## Usage
 
 ```yaml
 - uses: dwesh163/actions/detect-version@main
   with:
-    type: python
+    type: file
     github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
@@ -15,7 +15,8 @@ Detects the project version from `package.json` (JS) or `setup.py` (Python) and 
 
 | Name | Required | Values | Description |
 |------|----------|--------|-------------|
-| `type` | yes | `js`, `python` | Source file to read the version from |
+| `type` | yes | `js`, `python`, `file` | Source file to read the version from |
+| `path` | no | | Path to the version file when `type` is `file` (default: `.version`) |
 | `github-token` | yes | | Token used to query existing releases |
 
 ## Outputs
