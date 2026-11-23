@@ -1,0 +1,214 @@
+name: Docker release
+
+# Releases an image when the version of the repository is new: detect the version, build and push
+# ghcr.io/<repository>:latest and :<version>, create the GitHub release and, if asked, bump the chart.
+# The caller runs its own lint first (`needs: lint`) and grants `contents: write` and `packages: write`.
+# The version is released once: nothing happens while a release for it exists.
+
+on:
+  workflow_call:
+    inputs:
+      version-type:
+        description: "Where the version is read from: js (package.json), python (setup.py) or file"
+        type: string
+        default: js
+      version-path:
+        description: Path of the version file when version-type is file
+        type: string
+        default: .version
+      set-version:
+        description: "Where the version is written before the build: package-json, file (.version) or none"
+        type: string
+        default: package-json
+      build-args:
+        description: Docker build arguments, one KEY=value per line
+        type: string
+        default: ""
+      context:
+        description: Docker build context
+        type: string
+        default: .
+      dockerfile:
+        description: Path of the Dockerfile, relative to the repository root
+        type: string
+        default: Dockerfile
+      chart-repo:
+        description: "Repository holding the Helm chart to bump (owner/name). Empty: no chart is bumped"
+        type: string
+        default: ""
+      chart-name:
+        description: Name of the chart to bump
+        type: string
+        default: ""
+    secrets:
+      GH_APP_ID:
+        description: GitHub App id used to create the release and to bump the chart
+        required: false
+      GH_APP_SECRET:
+        description: Private key of that GitHub App
+        required: false
+    outputs:
+      version:
+        description: The detected version
+        value: ${{ jobs.detect.outputs.version }}
+      released:
+        description: "true when this run pushed the image and created the release"
+        value: ${{ jobs.release.outputs.released }}
+
+permissions: {}
+
+jobs:
+  detect:
+    name: Detect version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.detect.outputs.version }}
+      should_release: ${{ steps.detect.outputs.release_exist == 'false' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Detect version
+        id: detect
+        uses: dwesh163/actions/detect-version@137d796e679f991d22280478fa587d17f4fc148e # main
+        with:
+          type: ${{ inputs.version-type }}
+          path: ${{ inputs.version-path }}
+          github-token: ${{ github.token }}
+
+      - name: Validate the version
+        env:
+          VERSION: ${{ steps.detect.outputs.version }}
+        run: |
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::the detected version is not x.y.z"; exit 1; }
+
+  build:
+    name: Build and push
+    needs: detect
+    if: needs.detect.outputs.should_release == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      build_success: ${{ steps.done.outputs.build_success }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Compute the image tags
+        id: tags
+        env:
+          VERSION: ${{ needs.detect.outputs.version }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          IMAGE=$(printf 'ghcr.io/%s' "$REPOSITORY" | tr '[:upper:]' '[:lower:]')
+          {
+            echo "tags<<EOF"
+            echo "${IMAGE}:latest"
+            echo "${IMAGE}:${VERSION}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set the version
+        env:
+          VERSION: ${{ needs.detect.outputs.version }}
+          SET_VERSION: ${{ inputs.set-version }}
+        run: |
+          set -euo pipefail
+          case "$SET_VERSION" in
+            package-json) jq --arg v "$VERSION" '.version = $v' package.json > package.json.tmp && mv package.json.tmp package.json ;;
+            file) printf '%s' "$VERSION" > .version ;;
+            none) ;;
+            *) echo "::error::set-version must be package-json, file or none"; exit 1 ;;
+          esac
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.dockerfile }}
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          build-args: ${{ inputs.build-args }}
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Mark the build as done
+        id: done
+        run: echo "build_success=true" >> "$GITHUB_OUTPUT"
+
+  release:
+    name: Create release
+    needs: [detect, build]
+    if: needs.build.outputs.build_success == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      HAS_APP: ${{ secrets.GH_APP_ID != '' && secrets.GH_APP_SECRET != '' }}
+    outputs:
+      released: ${{ steps.done.outputs.released }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # With an App token the new tag and release trigger other workflows; the injected token does not.
+      - name: Generate the release token
+        id: app-token
+        if: env.HAS_APP == 'true'
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        with:
+          app-id: ${{ secrets.GH_APP_ID }} # deprecated by the action in favour of client-id, which is not the numeric id
+          private-key: ${{ secrets.GH_APP_SECRET }}
+
+      - name: Create release
+        uses: dwesh163/actions/release@137d796e679f991d22280478fa587d17f4fc148e # main
+        with:
+          version: ${{ needs.detect.outputs.version }}
+          github-token: ${{ steps.app-token.outputs.token || github.token }}
+
+      - name: Mark the release as done
+        id: done
+        run: echo "released=true" >> "$GITHUB_OUTPUT"
+
+  bump-chart:
+    name: Bump chart
+    needs: [detect, release]
+    if: needs.release.outputs.released == 'true' && inputs.chart-repo != '' && inputs.chart-name != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions: {}
+    steps:
+      - name: Bump chart version
+        uses: dwesh163/actions/bump-chart@137d796e679f991d22280478fa587d17f4fc148e # main
+        with:
+          chart-repo: ${{ inputs.chart-repo }}
+          chart-name: ${{ inputs.chart-name }}
+          app-version: ${{ needs.detect.outputs.version }}
+          github-app-id: ${{ secrets.GH_APP_ID }}
+          github-app-private-key: ${{ secrets.GH_APP_SECRET }}
