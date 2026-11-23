@@ -47,8 +47,8 @@ jobs:
     uses: dwesh163/actions/.github/workflows/docker-release.yaml@<sha> # <tag>
     with:
       version-type: js            # js | python | file
-      chart-repo: xdew-cloud/charts
-      chart-name: console
+      chart-repo: my-org/charts
+      chart-name: my-app
     secrets:
       GH_APP_ID: ${{ secrets.GH_APP_ID }}
       GH_APP_SECRET: ${{ secrets.GH_APP_SECRET }}
