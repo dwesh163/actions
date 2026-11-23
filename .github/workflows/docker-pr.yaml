@@ -1,0 +1,93 @@
+name: Docker PR image
+
+# Builds the image of a pull request and pushes it as ghcr.io/<repository>:<branch>-<short sha>.
+# The caller runs its own lint first (`needs: lint`) and grants `contents: read` and `packages: write`.
+# Pull requests from forks are not built: they have no secrets and a read-only token.
+
+on:
+  workflow_call:
+    inputs:
+      set-version:
+        description: "Where the image version is written before the build: package-json, file (.version) or none"
+        type: string
+        default: package-json
+      build-args:
+        description: Docker build arguments, one KEY=value per line
+        type: string
+        default: ""
+      context:
+        description: Docker build context
+        type: string
+        default: .
+      dockerfile:
+        description: Path of the Dockerfile, relative to the repository root
+        type: string
+        default: Dockerfile
+
+permissions: {}
+
+jobs:
+  image:
+    name: Build and push
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Compute the image tag
+        id: tag
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          SHA: ${{ github.sha }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          BRANCH=$(printf '%s' "$HEAD_REF" | sed 's/[^a-zA-Z0-9._-]/-/g')
+          BRANCH=${BRANCH:0:100}
+          BRANCH=${BRANCH#[.-]}
+          VERSION="${BRANCH}-${SHA:0:7}"
+          IMAGE=$(printf 'ghcr.io/%s' "$REPOSITORY" | tr '[:upper:]' '[:lower:]')
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tags=${IMAGE}:${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Set the version
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+          SET_VERSION: ${{ inputs.set-version }}
+        run: |
+          set -euo pipefail
+          case "$SET_VERSION" in
+            package-json) jq --arg v "$VERSION" '.version = $v' package.json > package.json.tmp && mv package.json.tmp package.json ;;
+            file) printf '%s' "$VERSION" > .version ;;
+            none) ;;
+            *) echo "::error::set-version must be package-json, file or none"; exit 1 ;;
+          esac
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.dockerfile }}
+          push: true
+          tags: ${{ steps.tag.outputs.tags }}
+          build-args: ${{ inputs.build-args }}
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
